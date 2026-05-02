@@ -456,8 +456,8 @@ wss.on('connection', (ws) => {
             
             if (transcript && transcript.trim().length > 0) {
                 if (data.is_final) {
-                    // OPTIMIZATION: Ignore very short background noises
-                    if (transcript.trim().length < 5) return;
+                    // OPTIMIZATION: Ignore single character noise
+                    if (transcript.trim().length < 2) return;
                     
                     console.log(`[Deepgram] Final Transcript: "${transcript}"`);
                     await processWithLLM(transcript);

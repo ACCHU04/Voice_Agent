@@ -108,38 +108,15 @@ function App() {
               };
 
               if (data.action === 'play_music') {
-                setNowPlaying(`Searching: ${data.song}...`);
+                setNowPlaying(data.song);
                 const songQuery = encodeURIComponent(data.song);
+                const ytUrl = `https://music.youtube.com/search?q=${songQuery}`;
                 
-                // Remove existing iframe if any
-                const existing = document.getElementById('yt-player-aegis');
-                if (existing) existing.remove();
-                
-                // Fetch real song preview from iTunes API and play natively
-                fetch(`https://itunes.apple.com/search?term=${songQuery}&entity=song&limit=1`)
-                  .then(res => res.json())
-                  .then(json => {
-                    if (json.results && json.results.length > 0) {
-                      const track = json.results[0];
-                      setNowPlaying(`${track.trackName} - ${track.artistName}`);
-                      if (musicRef.current) {
-                        musicRef.current.pause();
-                      }
-                      musicRef.current = new Audio(track.previewUrl);
-                      musicRef.current.volume = 0.8;
-                      musicRef.current.play().catch(e => {
-                        console.log('[Music] Autoplay blocked:', e);
-                        // Fallback: If blocked, redirect to YouTube Music
-                        window.location.href = `https://music.youtube.com/search?q=${songQuery}`;
-                      });
-                    } else {
-                      setNowPlaying(`Could not find: ${data.song}`);
-                    }
-                  })
-                  .catch(err => {
-                    console.error('[Music] API Error:', err);
-                    window.location.href = `https://music.youtube.com/search?q=${songQuery}`;
-                  });
+                // On a laptop, open in a new tab. If blocked, navigate current tab.
+                const newWindow = window.open(ytUrl, '_blank');
+                if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+                  window.location.href = ytUrl;
+                }
               }
               else if (data.action === 'cab_booked') {
                 setCabInfo({ eta: data.eta, destination: data.destination });
@@ -199,13 +176,22 @@ function App() {
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
       nextPlayTimeRef.current = audioContextRef.current.currentTime;
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Laptop-friendly microphone settings (reduces echo from speakers)
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 16000
+        } 
+      });
       mediaRecorderRef.current = new MediaRecorder(stream);
       mediaRecorderRef.current.ondataavailable = (event) => {
         if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(event.data);
         }
       };
+      // Send smaller chunks more frequently for lower latency and better stability
       mediaRecorderRef.current.start(250);
 
     } catch (error) {

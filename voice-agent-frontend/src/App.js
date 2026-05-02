@@ -99,26 +99,44 @@ function App() {
             }
 
             else if (data.type === 'hardware_action') {
+              const triggerApp = (intentUrl) => {
+                const iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                iframe.src = intentUrl;
+                document.body.appendChild(iframe);
+                setTimeout(() => iframe.remove(), 3000);
+              };
+
               if (data.action === 'play_music') {
                 setNowPlaying(data.song);
                 const songQuery = encodeURIComponent(data.song);
-                // Direct navigation to bypass popup blocker and auto-open the app
-                window.location.href = `https://music.youtube.com/search?q=${songQuery}`;
+                
+                // Remove existing player if any
+                const existing = document.getElementById('yt-player-aegis');
+                if (existing) existing.remove();
+                
+                // Embed invisible YouTube player to auto-play the search result
+                const iframe = document.createElement('iframe');
+                iframe.src = `https://www.youtube.com/embed?listType=search&list=${songQuery}&autoplay=1`;
+                iframe.allow = "autoplay";
+                iframe.style.display = 'none';
+                iframe.id = 'yt-player-aegis';
+                document.body.appendChild(iframe);
               }
               else if (data.action === 'cab_booked') {
                 setCabInfo({ eta: data.eta, destination: data.destination });
                 setTimeout(() => setCabInfo(null), 30000);
                 const dest = encodeURIComponent(data.destination);
-                window.location.href = `https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[formatted_address]=${dest}`;
+                triggerApp(`intent://?action=setPickup&pickup=my_location&dropoff[formatted_address]=${dest}#Intent;scheme=uber;package=com.ubercab;end;`);
               }
               else if (data.action === 'movie_booked') {
                 const movie = encodeURIComponent(data.movie);
-                window.location.href = `https://in.bookmyshow.com/explore/movies-bengaluru?q=${movie}`;
+                triggerApp(`intent://explore/movies-bengaluru?q=${movie}#Intent;scheme=https;package=com.bt.bms;end;`);
               }
               else if (data.action === 'appointment_booked') {
                 const title = encodeURIComponent(`Doctor: ${data.doctor}`);
                 const details = encodeURIComponent(`Hospital: ${data.hospital}\nBooked via Aegis`);
-                window.location.href = `https://calendar.google.com/calendar/r/eventedit?text=${title}&details=${details}`;
+                triggerApp(`intent://calendar.google.com/calendar/r/eventedit?text=${title}&details=${details}#Intent;scheme=https;package=com.google.android.calendar;end;`);
               }
             }
 

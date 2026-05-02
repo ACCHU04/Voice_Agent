@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const WebSocket = require('ws');
 const { createClient } = require('@deepgram/sdk');
 const { GoogleGenerativeAI, SchemaType } = require('@google/generative-ai');
@@ -25,6 +26,14 @@ requiredEnvVars.forEach(envVar => {
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
+
+// Serve Static Frontend Build
+app.use(express.static(path.join(__dirname, '../voice-agent-frontend/build')));
+
+// Fallback to index.html for SPA routing (using Regex to bypass strict parsing)
+app.get(/.*/, (req, res) => {
+    res.sendFile(path.join(__dirname, '../voice-agent-frontend/build', 'index.html'));
+});
 
 // Initialize WhatsApp (Baileys)
 let waSocket = null;
@@ -140,6 +149,43 @@ const tools = [{
             },
         },
         {
+            name: 'book_cab',
+            description: 'Books a cab (Uber/Ola) for the user to a destination.',
+            parameters: {
+                type: SchemaType.OBJECT,
+                properties: {
+                    destination: { type: SchemaType.STRING, description: 'Where the user wants to go (e.g., HSR Layout, Koramangala)' },
+                    cab_type: { type: SchemaType.STRING, description: 'Type of cab: economy, premium, or auto' }
+                },
+                required: ['destination'],
+            },
+        },
+        {
+            name: 'schedule_appointment',
+            description: 'Schedules a follow-up doctor appointment or hospital visit.',
+            parameters: {
+                type: SchemaType.OBJECT,
+                properties: {
+                    doctor_type: { type: SchemaType.STRING, description: 'Specialty like Cardiologist, General Physician, Orthopedic' },
+                    preferred_date: { type: SchemaType.STRING, description: 'Preferred date like Monday, Tomorrow, Next Week' },
+                    hospital: { type: SchemaType.STRING, description: 'Hospital name if specified' }
+                },
+                required: ['doctor_type'],
+            },
+        },
+        {
+            name: 'check_discharge_status',
+            description: 'Checks the current status of a patient\'s hospital discharge process including billing, insurance clearance, pharmacy, and lab reports.',
+            parameters: {
+                type: SchemaType.OBJECT,
+                properties: {
+                    patient_id: { type: SchemaType.STRING, description: 'Patient ID or name' },
+                    check_type: { type: SchemaType.STRING, description: 'What to check: billing, insurance, pharmacy, lab, or all' }
+                },
+                required: [],
+            },
+        },
+        {
             name: 'dispatch_medevac',
             description: 'Dispatches an emergency medical evacuation helicopter to specified coordinates. Requires authorization code.',
             parameters: {
@@ -150,13 +196,63 @@ const tools = [{
                 },
                 required: ['coordinates', 'auth_code'],
             },
+        },
+        {
+            name: 'activate_camera_triage',
+            description: 'Activates the phone camera to visually assess an injury for triage. Use when user describes an injury or wound that needs visual inspection.',
+            parameters: {
+                type: SchemaType.OBJECT,
+                properties: {
+                    reason: { type: SchemaType.STRING, description: 'Reason for visual triage (e.g., deep cut, burn, swelling)' }
+                },
+                required: ['reason'],
+            },
         }
     ]
 }];
 
+const SYSTEM_PROMPT = `You are Aegis, an advanced dual-state voice-first guardian agent built for high-stress and everyday scenarios.
+
+STATE 1: CIVILIAN MODE (Default)
+You are a warm, efficient personal assistant and Smart Concierge. You help with:
+- Booking movie tickets, cabs (Uber/Ola), and scheduling doctor appointments
+- Playing music on the user's device
+- Checking hospital discharge status (billing, insurance, pharmacy, lab reports)
+- General conversation and questions
+Speak naturally and conversationally. Be proactive - if someone books a cab, ask if they need anything else.
+
+STATE 2: CODE RED (Emergency Override)
+If the user says 'Initiate Code Red' or describes a medical emergency, INSTANTLY drop the friendly persona.
+Become a military-grade, zero-latency medical orchestrator:
+- Speak in ultra-concise sentences (max 10 words)
+- Confirm every action immediately
+- Log vitals, administer medication, trigger trauma alerts
+- Ask for 'Authorization Code' before dispatching Medevac
+- If you detect the user is injured and struggling to describe it, suggest activating camera triage: "I can see the injury through your camera. Permission to activate visual triage?"
+
+SMART CONCIERGE (Hospital Discharge Context)
+When a patient asks about their discharge:
+1. Check billing, insurance, pharmacy, and lab status
+2. Proactively inform them of bottlenecks (e.g., "Insurance clearance is pending")
+3. Offer to book their ride home once cleared
+4. Send updates to family via WhatsApp
+
+VISUAL TRIAGE PROTOCOL
+When activate_camera_triage is called:
+- The phone camera will capture the injury
+- You will receive the image for analysis
+- Provide IMMEDIATE first-aid instructions based on what you see
+- Classify severity: Minor, Moderate, Severe, Critical
+
+RULES:
+- Never use emergency tools in Civilian state
+- Never use consumer tools in Code Red state
+- If interrupted, immediately listen to the new command
+- Always be brief in emergency mode, conversational in civilian mode`;
+
 const generativeModel = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
-    systemInstruction: "You are Aegis, a dual-state voice agent.\nSTATE 1: CIVILIAN (Default). You are a friendly assistant. You help book movies, play music, and chat naturally.\nSTATE 2: CODE RED (Emergency). If the user says 'Initiate Code Red', drop the friendly persona immediately. Become a zero-latency medical orchestrator. Speak in ultra-concise sentences (max 10 words). Ask for an 'Authorization Code' before dispatching medical assets.\nRULES: Never use emergency tools in Civilian state. Never use consumer tools in Code Red state. If the user interrupts you with a correction, immediately discard previous context.",
+    systemInstruction: SYSTEM_PROMPT,
     tools: tools,
 });
 
@@ -241,8 +337,28 @@ wss.on('connection', (ws) => {
                                 song: call.args.song_name
                             }));
                         }
+                    } else if (call.name === 'book_cab') {
+                        const eta = Math.floor(Math.random() * 8) + 3;
+                        toolResult = { status: "Cab booked successfully", provider: "Uber", eta_minutes: eta, destination: call.args.destination, cab_type: call.args.cab_type || 'economy' };
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'hardware_action', action: 'cab_booked', eta: eta, destination: call.args.destination }));
+                        }
+                    } else if (call.name === 'schedule_appointment') {
+                        const apptId = 'APT-' + Math.floor(Math.random() * 90000 + 10000);
+                        toolResult = { status: "Appointment scheduled", appointment_id: apptId, doctor: call.args.doctor_type, date: call.args.preferred_date || 'Next available slot', hospital: call.args.hospital || 'Nearest partner hospital' };
+                    } else if (call.name === 'check_discharge_status') {
+                        // Simulate realistic discharge pipeline
+                        const statuses = {
+                            billing: { status: 'Cleared', amount: '₹12,450' },
+                            insurance: { status: 'Pending', note: 'Awaiting TPA approval. 2 patients ahead.' },
+                            pharmacy: { status: 'Ready', note: 'Prescriptions packed at Counter 3' },
+                            lab: { status: 'Cleared', note: 'All reports uploaded to patient portal' }
+                        };
+                        toolResult = { status: "Discharge status retrieved", pipeline: statuses };
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'discharge_update', statuses: statuses }));
+                        }
                     } else if (call.name === 'dispatch_medevac') {
-                        // Verify authorization code
                         const authCode = (call.args.auth_code || '').toLowerCase().replace(/[^a-z0-9]/g, '');
                         if (authCode === 'sigmaniner' || authCode === 'sigma9' || authCode === 'sigmanine') {
                             toolResult = { status: "Medevac dispatched", destination: call.args.coordinates, authorization: "VERIFIED" };
@@ -251,6 +367,11 @@ wss.on('connection', (ws) => {
                             toolResult = { status: "ACCESS DENIED", reason: "Invalid authorization code" };
                             console.log(`[MEDEVAC] ❌ ACCESS DENIED - Invalid auth code: ${call.args.auth_code}`);
                         }
+                    } else if (call.name === 'activate_camera_triage') {
+                        toolResult = { status: "Camera triage activated on user device", reason: call.args.reason };
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'activate_camera', reason: call.args.reason }));
+                        }
                     } else {
                         toolResult = { status: "Unknown tool called" };
                     }
@@ -258,8 +379,8 @@ wss.on('connection', (ws) => {
                     console.log(`[Gemini] Returning tool result:`, toolResult);
 
                     // Detect mode and send mode_switch to frontend
-                    const emergencyTools = ['log_vitals', 'administer_medication', 'trigger_trauma_alert', 'dispatch_medevac'];
-                    const civilianTools = ['book_movie_tickets', 'play_device_music'];
+                    const emergencyTools = ['log_vitals', 'administer_medication', 'trigger_trauma_alert', 'dispatch_medevac', 'activate_camera_triage'];
+                    const civilianTools = ['book_movie_tickets', 'play_device_music', 'book_cab', 'schedule_appointment', 'check_discharge_status'];
                     if (ws.readyState === WebSocket.OPEN) {
                         if (emergencyTools.includes(call.name)) {
                             ws.send(JSON.stringify({ type: 'mode_switch', mode: 'emergency' }));
@@ -300,8 +421,19 @@ wss.on('connection', (ws) => {
                         } else if (call.name === 'play_device_music') {
                             header = '🎵 *AEGIS CIVILIAN ASSISTANT* 🎵';
                             formattedDetails = `🎧 *Playing Music*\n🎶 Track: ${call.args.song_name}`;
+                        } else if (call.name === 'book_cab') {
+                            header = '🚕 *AEGIS CIVILIAN ASSISTANT* 🚕';
+                            formattedDetails = `🚗 *Cab Booked*\n📍 To: ${call.args.destination}\n🚘 Type: ${call.args.cab_type || 'Economy'}\n⏱️ ETA: ${toolResult.eta_minutes} mins`;
+                        } else if (call.name === 'schedule_appointment') {
+                            header = '🏥 *AEGIS CIVILIAN ASSISTANT* 🏥';
+                            formattedDetails = `📋 *Appointment Scheduled*\n👨‍⚕️ Doctor: ${call.args.doctor_type}\n📅 Date: ${call.args.preferred_date || 'Next available'}\n🏥 Hospital: ${call.args.hospital || 'Partner hospital'}`;
+                        } else if (call.name === 'check_discharge_status') {
+                            header = '🏥 *AEGIS DISCHARGE UPDATE* 🏥';
+                            formattedDetails = `📊 *Discharge Pipeline*\n💰 Billing: Cleared (₹12,450)\n🛡️ Insurance: Pending TPA\n💊 Pharmacy: Ready at Counter 3\n🔬 Lab: All reports cleared`;
                         } else if (call.name === 'dispatch_medevac') {
                             formattedDetails = `🚁 *MEDEVAC DISPATCHED*\n📍 Target: ${call.args.coordinates}\n🔐 Auth: ${call.args.auth_code}\n✅ Status: AIRBORNE`;
+                        } else if (call.name === 'activate_camera_triage') {
+                            formattedDetails = `📸 *VISUAL TRIAGE ACTIVATED*\n🔍 Reason: ${call.args.reason}\n📱 Camera feed active on patient device`;
                         }
 
                         const textMsg = `${header}\n_Time: ${timestamp}_\n\n${formattedDetails}\n\n_Status: System Logging Active_`;
@@ -449,7 +581,7 @@ wss.on('connection', (ws) => {
     });
 });
 
-const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-    console.log(`[Server] WebSocket server is listening on port ${PORT}`);
+const PORT = process.env.PORT || 8081;
+server.listen(8081, () => {
+    console.log(`[Server] WebSocket server is listening on port 8081`);
 });

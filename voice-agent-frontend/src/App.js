@@ -24,6 +24,7 @@ const TOOL_ICONS = {
   book_cab: '🚕',
   schedule_appointment: '📋',
   check_discharge_status: '🏥',
+  close_browser: '❌',
 };
 
 function App() {
@@ -38,6 +39,7 @@ function App() {
   const [showCamera, setShowCamera] = useState(false);
   const [cameraReason, setCameraReason] = useState('');
   const [pendingAction, setPendingAction] = useState(null);
+  const [hudData, setHudData] = useState(null);
 
   const wsRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -48,6 +50,7 @@ function App() {
   const canvasRef = useRef(null);
   const cameraStreamRef = useRef(null);
   const aiTranscriptTimer = useRef(null);
+  const hudTimerRef = useRef(null);
 
   useEffect(() => {
     document.body.classList.toggle('emergency-mode', mode === 'emergency');
@@ -137,40 +140,28 @@ function App() {
                 details: data.details,
                 isEmergency: EMERGENCY_TOOLS.includes(data.tool),
               }, ...prev].slice(0, 20));
+              
+              setHudData({
+                tool: data.tool,
+                details: data.details
+              });
+              clearTimeout(hudTimerRef.current);
+              hudTimerRef.current = setTimeout(() => setHudData(null), 4000);
             }
 
             else if (data.type === 'hardware_action') {
               if (data.action === 'play_music') {
                 setNowPlaying(data.song);
-                const songQuery = encodeURIComponent(data.song);
-                const ytUrl = `https://music.youtube.com/search?q=${songQuery}`;
-
-                // Open in a new tab (laptop). If blocked, show fallback button.
-                const newWindow = window.open(ytUrl, '_blank');
-                if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
-                  setPendingAction({ type: 'music', label: `▶️ Open YouTube: ${data.song}`, url: ytUrl });
-                }
               }
               else if (data.action === 'cab_booked') {
                 setCabInfo({ eta: data.eta, destination: data.destination });
                 setTimeout(() => setCabInfo(null), 30000);
-                const dest = encodeURIComponent(data.destination);
-                const uberUrl = `https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[formatted_address]=${dest}`;
-                const newWindow = window.open(uberUrl, '_blank');
-                if (!newWindow) setPendingAction({ type: 'cab', label: `🚕 Open Uber: ${data.destination}`, url: uberUrl });
               }
               else if (data.action === 'movie_booked') {
-                const movie = encodeURIComponent(data.movie);
-                const bmsUrl = `https://in.bookmyshow.com/explore/movies-bengaluru?q=${movie}`;
-                const newWindow = window.open(bmsUrl, '_blank');
-                if (!newWindow) setPendingAction({ type: 'movie', label: `🎬 Open BookMyShow: ${data.movie}`, url: bmsUrl });
+                // Handled by Backend Puppeteer
               }
               else if (data.action === 'appointment_booked') {
-                const title = encodeURIComponent(`Doctor: ${data.doctor}`);
-                const details = encodeURIComponent(`Hospital: ${data.hospital}\nBooked via Aegis`);
-                const calUrl = `https://calendar.google.com/calendar/r/eventedit?text=${title}&details=${details}`;
-                const newWindow = window.open(calUrl, '_blank');
-                if (!newWindow) setPendingAction({ type: 'appointment', label: `📋 Open Calendar`, url: calUrl });
+                // Handled by Backend
               }
             }
 
@@ -363,183 +354,96 @@ function App() {
   };
 
   return (
-    <div className={`app-container ${mode}`}>
-      {mode === 'emergency' && <div className="emergency-flash" />}
-
+    <div className="h-screen flex flex-col items-center justify-between p-8 matrix-bg relative w-full">
       {/* Header */}
-      <div className="app-header">
-        <div className="header-left">
-          <h2 className="header-name">Rishav Singh</h2>
-          <span className="header-subtitle">MSc Data Science (2025-2027)</span>
-        </div>
-        <div className={`header-shield ${mode}`}>
-          <span>🛡️</span>
-        </div>
-      </div>
-
-      {/* Central Aegis Core */}
-      <div className="aegis-core-container">
-        <div className={`aegis-core ${mode} ${getStatusClass()}`}>
-          <span className="core-icon">{mode === 'emergency' ? '⚠️' : '🔐'}</span>
-        </div>
-        <div className={`status-label ${mode}`}>
-          {status === 'Disconnected' ? 'AEGIS STANDBY' :
-           status === 'Listening' ? 'AEGIS LISTENING' :
-           'AEGIS ACTIVE'}
+      <div className="text-center w-full relative z-10">
+        <p className="text-xs tracking-[0.3em] text-gray-500 mb-2 uppercase">Matrix Development Team</p>
+        <h1 className="text-4xl font-bold tracking-tight text-white italic">Aegis Guardian AI</h1>
+        <div 
+          className={`font-bold tracking-widest mt-2 animate__animated animate__pulse animate__infinite ${status === 'Listening' ? 'text-blue-400' : 'text-orange-500'}`}
+        >
+          {status === 'Disconnected' ? 'STANDBY' : status.toUpperCase()}
         </div>
       </div>
 
-      {/* Waveform */}
-      <div className={`wave-container ${status === 'Listening' || status === 'AI Speaking' ? 'active' : ''}`}>
-        <div className="bar"></div><div className="bar"></div><div className="bar"></div><div className="bar"></div><div className="bar"></div>
-      </div>
-
-      {/* AI Transcript */}
-      {aiTranscript && (
-        <div className={`ai-transcript-bubble ${mode}`}>
-          <span className="transcript-label">Aegis:</span>
-          <span className="transcript-text">{aiTranscript}</span>
+      {/* Central Core Area */}
+      <div className="relative flex items-center justify-center flex-1 w-full">
+        {/* Visualizer Ring */}
+        <div className={`absolute w-[400px] h-[400px] border rounded-full animate-core ${status === 'Listening' ? 'border-blue-500/40' : 'border-orange-500/20'}`}></div>
+        
+        {/* The Core Image */}
+        <div className={`w-64 h-64 rounded-full flex items-center justify-center text-7xl relative z-10 ${status === 'Listening' ? 'glow-blue' : 'glow-orange'} bg-black/50 border border-gray-800`}>
+          {status === 'Listening' ? '🎙️' : '🛡️'}
         </div>
-      )}
-
-      {/* Camera Triage Overlay */}
-      {showCamera && (
-        <div className="camera-overlay">
-          <div className="camera-header">
-            <span>📸 Visual Triage: {cameraReason}</span>
-            <button className="camera-close" onClick={stopCamera}>✕</button>
-          </div>
-          <video ref={videoRef} autoPlay playsInline className="camera-feed" />
-          <canvas ref={canvasRef} style={{ display: 'none' }} />
-          <button className="camera-capture-btn" onClick={captureAndSend}>
-            📷 Capture & Analyze
-          </button>
-        </div>
-      )}
-
-      {/* Discharge Status Card */}
-      {dischargeData && (
-        <div className="discharge-card">
-          <h4>📊 Discharge Pipeline</h4>
-          <div className="discharge-grid">
-            {Object.entries(dischargeData).map(([key, val]) => (
-              <div key={key} className={`discharge-item ${val.status === 'Cleared' || val.status === 'Ready' ? 'cleared' : 'pending'}`}>
-                <span className="discharge-label">{key.charAt(0).toUpperCase() + key.slice(1)}</span>
-                <span className={`discharge-status ${val.status.toLowerCase()}`}>{val.status}</span>
-                {val.note && <span className="discharge-note">{val.note}</span>}
-                {val.amount && <span className="discharge-note">{val.amount}</span>}
+        
+        {/* ACTION OVERLAY (HUD) */}
+        {hudData && (
+          <div className="absolute z-20 animate__animated animate__zoomIn">
+            <div className="hud-card p-6 rounded-xl w-80 text-center">
+              <div className="text-4xl mb-3">{getToolIcon(hudData.tool)}</div>
+              <h2 className="text-xl font-bold text-orange-400">{getToolDisplayName(hudData.tool)}</h2>
+              <p className="text-sm text-gray-400 mt-1">{formatLogDetails(hudData.tool, hudData.details)}</p>
+              <div className="w-full bg-gray-800 h-1 mt-4 rounded-full overflow-hidden">
+                <div className="bg-orange-500 h-full animate-progress" style={{ width: '50%' }}></div>
               </div>
-            ))}
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* Cab Info Card */}
-      {cabInfo && (
-        <div className="cab-card">
-          <span className="cab-icon">🚕</span>
-          <div className="cab-details">
-            <span className="cab-title">Cab Confirmed!</span>
-            <span className="cab-dest">📍 {cabInfo.destination} • ⏱️ {cabInfo.eta} min</span>
+        )}
+        
+        {/* AI Transcript Bubble */}
+        {aiTranscript && !hudData && (
+          <div className="absolute top-1/4 z-20 bg-black/80 border border-blue-500/40 p-4 rounded-lg max-w-md text-center animate__animated animate__fadeInUp">
+            <p className="text-blue-300 font-medium">"{aiTranscript}"</p>
           </div>
-        </div>
-      )}
-
-      {/* Music Player */}
-      {nowPlaying && (
-        <div className="music-bar">
-          <span className="music-icon">🎵</span>
-          <span className="music-text">Now Playing: {nowPlaying}</span>
-          <div className="music-eq">
-            <div className="eq-bar"></div><div className="eq-bar"></div><div className="eq-bar"></div><div className="eq-bar"></div>
-          </div>
-        </div>
-      )}
-
-      {/* Fallback Action Card (if popup blocked) */}
-      {pendingAction && (
-        <div className="pending-action-card">
-          <a
-            href={pendingAction.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="pending-action-btn"
-            onClick={() => setTimeout(() => setPendingAction(null), 2000)}
-          >
-            {pendingAction.label}
-          </a>
-          <button className="pending-action-dismiss" onClick={() => setPendingAction(null)}>✕</button>
-        </div>
-      )}
-
-      {/* Services & Bookings */}
-      {isConnected && mode === 'civilian' && (
-        <div className="services-card">
-          <h4>Services & Bookings</h4>
-          <div className="services-grid">
-            <button className="service-btn" onClick={() => {
-              if (wsRef.current?.readyState === WebSocket.OPEN) {
-                setAiTranscript('Asking Aegis to book a cab...');
-              }
-            }}>🚕 Book Cab</button>
-            <button className="service-btn" onClick={() => {
-              if (wsRef.current?.readyState === WebSocket.OPEN) {
-                setAiTranscript('Asking Aegis for appointment...');
-              }
-            }}>🏥 Appt.</button>
-          </div>
-        </div>
-      )}
-
-      {/* Activity Log */}
-      <div className="action-log-container">
-        <h4 className="log-title">{mode === 'civilian' ? '📋 System Activity Log' : '🚨 Operations Log'}</h4>
-        {actionLogs.length === 0 ? (
-          <p className="no-logs">
-            {mode === 'civilian' ? 'Say "Book a cab to HSR Layout"' : 'Awaiting trauma input...'}
-          </p>
-        ) : (
-          <ul className="action-log-list">
-            {actionLogs.map((log, i) => (
-              <li key={i} className={`action-log-item ${log.isEmergency ? 'tool-emergency' : 'tool-civilian'}`}>
-                <span className="log-time">{log.time}</span>
-                <span className="log-tool">
-                  <span className="tool-icon">{getToolIcon(log.tool)}</span>
-                  {getToolDisplayName(log.tool)}
-                </span>
-                <span className="log-details">{formatLogDetails(log.tool, log.details)}</span>
-              </li>
-            ))}
-          </ul>
         )}
       </div>
 
-      {/* Controls */}
-      <div className="controls">
-        {!isConnected ? (
-          <button className="btn-primary" onClick={startConversation}>
-            Start Conversation
-          </button>
-        ) : (
-          <>
-            <button className="btn-primary btn-danger" onClick={stopConversation}>
+      {/* Bottom Controls & Logs */}
+      <div className="w-full max-w-5xl grid grid-cols-3 items-end relative z-10">
+        
+        {/* Left: Activity Log */}
+        <div className="hud-card p-4 rounded-lg text-xs leading-relaxed text-gray-400 h-40 overflow-y-auto custom-scrollbar">
+          <h3 className="text-orange-500 font-bold mb-2 uppercase tracking-tighter sticky top-0 bg-[#141414cc] pb-1">Activity Log</h3>
+          {actionLogs.length === 0 ? (
+            <>
+              <p>✓ Connections validated</p>
+              <p>✓ Llama 3B Brain: Online</p>
+              <p>✓ System Modules: Active</p>
+              <p>✓ Ready for interaction</p>
+            </>
+          ) : (
+            actionLogs.map((log, i) => (
+              <p key={i} className="mb-1">
+                <span className="text-gray-600">[{log.time}]</span>{' '}
+                <span className={log.isEmergency ? 'text-red-400' : 'text-blue-400'}>{getToolDisplayName(log.tool)}</span>
+                {' - '}{formatLogDetails(log.tool, log.details)}
+              </p>
+            ))
+          )}
+        </div>
+
+        {/* Center: Controls */}
+        <div className="flex flex-col items-center justify-end h-full pb-4">
+          {!isConnected ? (
+            <button onClick={startConversation} className="bg-orange-600 hover:bg-orange-500 transition-all px-12 py-4 rounded-full font-bold uppercase tracking-widest shadow-[0_0_20px_rgba(255,120,0,0.4)] text-white">
+              Start Conversation
+            </button>
+          ) : (
+            <button onClick={stopConversation} className="bg-red-900/80 hover:bg-red-600 transition-all px-12 py-4 border border-red-500/50 rounded-full font-bold uppercase tracking-widest shadow-[0_0_20px_rgba(255,0,0,0.3)] text-white">
               End Session
             </button>
-            {mode === 'civilian' && (
-              <button className="btn-code-red" onClick={() => {
-                setMode('emergency');
-                if (musicRef.current) { musicRef.current.pause(); musicRef.current = null; setNowPlaying(null); }
-              }}>
-                ⚠️ MANUAL CODE RED
-              </button>
-            )}
-          </>
-        )}
-      </div>
+          )}
+          <p className="text-[10px] text-gray-600 mt-4 uppercase font-semibold tracking-wider">Powered by Llama 3 / Cartesia / MCP</p>
+        </div>
 
-      {/* Footer */}
-      <div className="app-footer">
-        <span>Powered by Llama 3 · Deepgram · Cartesia</span>
+        {/* Right: System Status */}
+        <div className="text-right flex flex-col items-end justify-end h-full pb-4">
+          <div className="flex items-center gap-2 text-gray-400 mb-2">
+            <span className={`w-2 h-2 rounded-full animate-pulse ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
+            {isConnected ? 'System Secure & Active' : 'System Offline'}
+          </div>
+          <p className="text-xs font-bold text-gray-500 uppercase italic tracking-widest">Team Matrix</p>
+        </div>
       </div>
     </div>
   );
